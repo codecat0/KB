@@ -2,6 +2,7 @@
 Date: 2026-06-06
 tags:
   - VScode
+  - 远程连接
 ---
 ## [server] Found running server
 

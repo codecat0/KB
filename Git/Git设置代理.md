@@ -2,6 +2,7 @@
 Date: 2026-06-08
 tags:
   - git
+  - 代理
 ---
 ### 1. 查看 Git 自身的 HTTP/HTTPS 代理配置
 ```sh
