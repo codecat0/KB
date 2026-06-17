@@ -325,9 +325,10 @@ async def openai_stream_to_anthropic_sse(
 ) -> AsyncIterator[str]:
     """Convert OpenAI SSE chunk stream → Anthropic SSE event stream."""
     msg_id = f"msg_{uuid.uuid4().hex[:24]}"
-    content_block_idx = 0
-    tool_use_idx: dict[int, str] = {}
     started = False
+    sent_stop = False  # 防止重复发送 message_delta / message_stop
+    open_blocks: set[int] = set()  # 跟踪所有已开始的块索引
+    tool_use_idx: dict[int, str] = {}
     pending_tool_calls: dict[int, dict] = {}
 
     async for chunk_bytes in stream:
@@ -349,54 +350,52 @@ async def openai_stream_to_anthropic_sse(
             if not choices:
                 continue
             delta = choices[0].get("delta", {})
-
             finish_reason = choices[0].get("finish_reason")
 
-            # --- message_start ---
+            # --- 首次启动 ---
             if not started:
                 started = True
                 yield f"event: message_start\ndata: {json.dumps({'type': 'message_start', 'message': {'id': msg_id, 'type': 'message', 'role': 'assistant', 'content': [], 'model': model}})}\n\n"
+                # 开启文本块 (index 0)
                 yield f"event: content_block_start\ndata: {json.dumps({'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'text', 'text': ''}})}\n\n"
+                open_blocks.add(0)
 
-            # Skip reasoning-only deltas
-            if delta.get("reasoning_content") and not delta.get("content") and not delta.get("tool_calls"):
-                continue
-
-            # Text delta
+            # 文本增量
             text_delta = delta.get("content")
             if text_delta:
                 yield f"event: content_block_delta\ndata: {json.dumps({'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'text_delta', 'text': text_delta}})}\n\n"
 
-            # Tool call deltas
+            # 工具调用增量
             tc_deltas = delta.get("tool_calls") or []
             for tc_delta in tc_deltas:
                 idx = tc_delta.get("index", 0)
                 tc_id = tc_delta.get("id")
                 tc_func = tc_delta.get("function", {})
 
-                # New tool call
+                # 新的工具调用块
                 if tc_id and idx not in tool_use_idx:
                     tool_use_idx[idx] = tc_id
-                    yield f"event: content_block_start\ndata: {json.dumps({'type': 'content_block_start', 'index': idx + 1, 'content_block': {'type': 'tool_use', 'id': tc_id, 'name': tc_func.get('name', '')}})}\n\n"
+                    block_index = idx + 1  # 文本块占 0，工具调用从 1 开始
+                    yield f"event: content_block_start\ndata: {json.dumps({'type': 'content_block_start', 'index': block_index, 'content_block': {'type': 'tool_use', 'id': tc_id, 'name': tc_func.get('name', ''), 'input': {}}})}\n\n"
+                    open_blocks.add(block_index)
 
-                # Tool call argument delta
+                # 参数增量
                 if tc_func.get("arguments"):
                     pending_tool_calls[idx] = True
                     yield f"event: content_block_delta\ndata: {json.dumps({'type': 'content_block_delta', 'index': idx + 1, 'delta': {'type': 'input_json_delta', 'partial_json': tc_func['arguments']}})}\n\n"
 
-            # Tool call content blocks end
-            if finish_reason:
-                for idx in tool_use_idx:
-                    yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': idx + 1})}\n\n"
+            # --- 流结束处理（只执行一次）---
+            if finish_reason and not sent_stop:
+                sent_stop = True
+                # 关闭所有已打开的内容块
+                for block_idx in sorted(open_blocks):
+                    yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': block_idx})}\n\n"
 
-            # --- message_delta (stop_reason) ---
-            if finish_reason:
                 stop_reason = "tool_use" if finish_reason == "tool_calls" else "end_turn"
                 if finish_reason == "length":
                     stop_reason = "max_tokens"
                 yield f"event: message_delta\ndata: {json.dumps({'type': 'message_delta', 'delta': {'stop_reason': stop_reason, 'stop_sequence': None}, 'usage': {'output_tokens': 0}})}\n\n"
                 yield f"event: message_stop\ndata: {json.dumps({'type': 'message_stop'})}\n\n"
-
 
 # ---------------------------------------------------------------------------
 # Endpoints
