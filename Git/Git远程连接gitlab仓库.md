@@ -27,7 +27,7 @@ git remote -v
 ```
 - 显示 fetch 和 push 的地址
 ![[Git远程连接gitlab仓库-1784172710038.webp]]
-### Step4：推送本地 `dev_hlz` 到远程并建立跟踪
+## Step4：推送本地 `dev_hlz` 到远程并建立跟踪
 
 ```sh
 git push -u origin dev_hlz
