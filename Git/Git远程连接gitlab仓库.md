@@ -21,7 +21,7 @@ git branch -m 当前分支名 dev_hlz
 ## Step3：添加远程仓库
 
 ```sh
-git remote add origin git@106.63.4.7:ai-lab/algorithm/endoscope/endogi_visai_server.git
+	git remote add origin git@106.63.4.7:ai-lab/algorithm/endoscope/endogi_visai_server.git
 
 git remote -v
 ```
